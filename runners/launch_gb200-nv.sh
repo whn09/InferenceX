@@ -50,6 +50,8 @@ NGINX_SQUASH_FILE="/mnt/lustre01/users-public/sa-shared/$(echo "$NGINX_IMAGE" | 
 enroot import -o $SQUASH_FILE docker://$IMAGE
 enroot import -o $NGINX_SQUASH_FILE docker://$NGINX_IMAGE
 
+export EVAL_ONLY="${EVAL_ONLY:-false}"
+
 export ISL="$ISL"
 export OSL="$OSL"
 

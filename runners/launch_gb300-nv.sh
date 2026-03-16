@@ -31,6 +31,8 @@ NGINX_SQUASH_FILE="/home/sa-shared/squash/$(echo "$NGINX_IMAGE" | sed 's/[\/:@#]
 srun --partition=$SLURM_PARTITION --exclusive --time=180 bash -c "enroot import -o $SQUASH_FILE docker://$IMAGE"
 srun --partition=$SLURM_PARTITION --exclusive --time=180 bash -c "enroot import -o $NGINX_SQUASH_FILE docker://$NGINX_IMAGE"
 
+export EVAL_ONLY="${EVAL_ONLY:-false}"
+
 export ISL="$ISL"
 export OSL="$OSL"
 

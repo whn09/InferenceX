@@ -468,7 +468,9 @@ if [ "$NODE_RANK" -eq 0 ]; then
         ${BENCH_OUTPUT_LEN} "${BENCH_MAX_CONCURRENCY}" ${BENCH_REQUEST_RATE} \
         ${BENCH_RANDOM_RANGE_RATIO} ${BENCH_NUM_PROMPTS_MULTIPLIER}"
 
-    if [[ "$DRY_RUN" -eq 1 ]]; then
+    if [[ "${EVAL_ONLY:-false}" == "true" ]]; then
+        echo "EVAL_ONLY mode: skipping throughput benchmark"
+    elif [[ "$DRY_RUN" -eq 1 ]]; then
         echo "DRY RUN: $BENCH_CMD"
     else
         set -x
