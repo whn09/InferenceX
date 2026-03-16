@@ -160,6 +160,9 @@ PY
         echo "Logs copied to $ARTIFACT_DIR for artifact upload"
     fi
 
+    # Clean up root-owned files to prevent EACCES on GH Actions checkout cleanup
+    sudo rm -rf "$BENCHMARK_LOGS_DIR" 2>/dev/null || true
+
 else
 
     export HF_HUB_CACHE_MOUNT="/var/lib/hf-hub-cache/"
