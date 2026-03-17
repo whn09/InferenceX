@@ -218,7 +218,7 @@ jobs:
           path: agg_${{ env.RESULT_FILENAME }}_*.json
 
       - name: Upload eval results (if any)
-        if: ${{ env.RUN_EVAL == 'true' || inputs.eval-only }}
+        if: ${{ always() && (env.RUN_EVAL == 'true' || inputs.eval-only) }}
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: eval_${{ env.EXP_NAME }}_${{ env.RESULT_FILENAME }}
@@ -226,7 +226,7 @@ jobs:
             meta_env.json
             results*.json
             sample*.jsonl
-          if-no-files-found: ${{ inputs.eval-only && 'error' || 'ignore' }}
+          if-no-files-found: ignore
 
       - name: Verify eval scores
         if: ${{ inputs.eval-only }}

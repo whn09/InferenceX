@@ -40,8 +40,9 @@ def mark_eval_entries(matrix_values: list[dict]) -> list[dict]:
       spec-decoding, dp-attn), mark highest TP with highest conc and lowest TP
       with highest conc.
     - Multi-node: for each unique (model, runner, framework, precision,
-      spec-decoding), prefer 8k1k entries; fall back to 1k8k if unavailable
-      (never 1k1k). Mark the entry with the highest max concurrency.
+      spec-decoding, prefill-dp-attn, decode-dp-attn), prefer 8k1k entries;
+      fall back to 1k8k if unavailable (never 1k1k). Mark the entry with the
+      highest max concurrency.
 
     Grouping includes spec-decoding so MTP (mtp) and non-MTP (none) are treated
     independently.
@@ -118,12 +119,16 @@ def mark_eval_entries(matrix_values: list[dict]) -> list[dict]:
         if Fields.PREFILL.value not in entry:
             continue
 
+        prefill_dp = entry.get(Fields.PREFILL.value, {}).get(Fields.DP_ATTN.value)
+        decode_dp = entry.get(Fields.DECODE.value, {}).get(Fields.DP_ATTN.value)
         key = (
             entry[Fields.MODEL.value],
             entry[Fields.RUNNER.value],
             entry[Fields.FRAMEWORK.value],
             entry[Fields.PRECISION.value],
             entry[Fields.SPEC_DECODING.value],
+            prefill_dp,
+            decode_dp,
         )
         mn_groups[key].append((i, entry))
 
