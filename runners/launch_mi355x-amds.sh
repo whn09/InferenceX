@@ -105,45 +105,48 @@ if [[ "$IS_MULTINODE" == "true" ]]; then
     # search for "FRAMEWORK_DIFF_IF_STATEMENT #3" for this if-statement
     # Find the latest log directory that contains the data
 
-    cat > collect_latest_results.py <<'PY'
+    if [[ "${EVAL_ONLY:-false}" != "true" ]]; then
+        cat > collect_latest_results.py <<'PY'
 import os, sys
 sgl_job_dir, isl, osl, nexp = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
 for path in sorted([f"{sgl_job_dir}/logs/{name}/sglang_isl_{isl}_osl_{osl}" for name in os.listdir(f"{sgl_job_dir}/logs/") if os.path.isdir(f"{sgl_job_dir}/logs/{name}/sglang_isl_{isl}_osl_{osl}")], key=os.path.getmtime, reverse=True)[:nexp]:
     print(path)
 PY
 
-    LOGS_DIR=$(python3 collect_latest_results.py "$BENCHMARK_LOGS_DIR" "$ISL" "$OSL" 1)
-    if [ -z "$LOGS_DIR" ]; then
-        echo "No logs directory found for ISL=${ISL}, OSL=${OSL}"
-        exit 1
-    fi
-
-    echo "Found logs directory: $LOGS_DIR"
-    ls -la "$LOGS_DIR"
-
-    # Result JSON are contained within the result directory
-    for result_file in $(find $LOGS_DIR -type f); do
-        # result_file should directly be isl_ISL_osl_OSL_concurrency_CONC_req_rate_R_gpus_N_ctx_M_gen_N.json
-        file_name=$(basename $result_file)
-        if [ -f $result_file ]; then
-            # Copy the result file to workspace with a unique name
-            WORKSPACE_RESULT_FILE="$GITHUB_WORKSPACE/${RESULT_FILENAME}_${file_name}"
-            echo "Found result file ${result_file}. Copying it to ${WORKSPACE_RESULT_FILE}"
-            cp $result_file $WORKSPACE_RESULT_FILE
+        LOGS_DIR=$(python3 collect_latest_results.py "$BENCHMARK_LOGS_DIR" "$ISL" "$OSL" 1)
+        if [ -z "$LOGS_DIR" ]; then
+            echo "No logs directory found for ISL=${ISL}, OSL=${OSL}"
+            exit 1
         fi
-    done
+
+        echo "Found logs directory: $LOGS_DIR"
+        ls -la "$LOGS_DIR"
+
+        # Result JSON are contained within the result directory
+        for result_file in $(find $LOGS_DIR -type f); do
+            # result_file should directly be isl_ISL_osl_OSL_concurrency_CONC_req_rate_R_gpus_N_ctx_M_gen_N.json
+            file_name=$(basename $result_file)
+            if [ -f $result_file ]; then
+                # Copy the result file to workspace with a unique name
+                WORKSPACE_RESULT_FILE="$GITHUB_WORKSPACE/${RESULT_FILENAME}_${file_name}"
+                echo "Found result file ${result_file}. Copying it to ${WORKSPACE_RESULT_FILE}"
+                cp $result_file $WORKSPACE_RESULT_FILE
+            fi
+        done
+    fi
 
     # Extract eval results if eval was requested
     if [[ "${RUN_EVAL:-false}" == "true" ]]; then
-        EVAL_DIR="$(dirname "$LOGS_DIR")/eval_results"
-        if [ -d "$EVAL_DIR" ]; then
+        # Find eval_results in the slurm job logs directory
+        EVAL_DIR=$(find "$BENCHMARK_LOGS_DIR/logs" -type d -name eval_results 2>/dev/null | head -1)
+        if [ -n "$EVAL_DIR" ] && [ -d "$EVAL_DIR" ]; then
             echo "Extracting eval results from $EVAL_DIR"
             for eval_file in "$EVAL_DIR"/*; do
                 [ -f "$eval_file" ] && cp "$eval_file" "$GITHUB_WORKSPACE/"
                 echo "Copied eval artifact: $(basename "$eval_file")"
             done
         else
-            echo "WARNING: RUN_EVAL=true but no eval results found at $EVAL_DIR"
+            echo "WARNING: RUN_EVAL=true but no eval results found under $BENCHMARK_LOGS_DIR/logs"
         fi
     fi
 
