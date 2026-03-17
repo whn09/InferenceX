@@ -51,6 +51,10 @@ if [[ "$IS_MULTINODE" == "true" ]]; then
     mkdir -p "$BENCHMARK_LOGS_DIR"
     sudo rm -rf "$BENCHMARK_LOGS_DIR/logs" 2>/dev/null || true
 
+    # Ensure root-owned files are cleaned up even on early exit to prevent
+    # EACCES errors when the next GH Actions job checks out on this runner
+    trap 'sudo rm -rf "$BENCHMARK_LOGS_DIR" 2>/dev/null || true' EXIT
+
     SCRIPT_NAME="${EXP_NAME%%_*}_${PRECISION}_mi355x_${FRAMEWORK}.sh"
     if [[ "$FRAMEWORK" == "sglang-disagg" ]]; then
         BENCHMARK_SUBDIR="multi_node"
