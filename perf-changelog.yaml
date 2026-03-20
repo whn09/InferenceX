@@ -933,6 +933,61 @@
   pr-link: https://github.com/SemiAnalysisAI/InferenceX/pull/867
   
 - config-keys:
+    - kimik2.5-fp4-b200-vllm
+  description:
+    - "Add Kimi K2.5 FP4 B200 vLLM benchmark configuration"
+    - "Image: vllm/vllm-openai:v0.17.0"
+  pr-link: https://github.com/SemiAnalysisAI/InferenceX/pull/862
+
+- config-keys:
+    - minimaxm2.5-fp8-b200-vllm
+  description:
+    - "Add MiniMax-M2.5 FP8 vLLM benchmark for B200"
+    - "Model: MiniMaxAI/MiniMax-M2.5 with --trust-remote-code"
+    - "Image: vllm/vllm-openai:v0.17.0"
+    - "TP=2 and TP=4, concurrency 4-64 for 1k1k, 1k8k, and 8k1k sequence lengths"
+  pr-link: https://github.com/SemiAnalysisAI/InferenceX/pull/757
+
+- config-keys:
+    - dsr1-fp4-mi355x-sglang-disagg
+    - dsr1-fp4-mi355x-sglang-disagg-mtp
+  description:
+    - "Add more sweep configs for MI355X FP4 Disagg"
+    - "Bump FP4 image to Feb 27 latest"
+  pr-link: https://github.com/SemiAnalysisAI/InferenceX/pull/899
+
+- config-keys:
+    - minimaxm2.5-fp8-h200-vllm
+  description:
+    - "Extend MiniMax M2.5 FP8 single-node config for H200 with vLLM v0.16.0 (TP8)"
+  pr-link: https://github.com/SemiAnalysisAI/InferenceX/pull/869
+
+- config-keys:
+    - dsr1-fp8-b200-dynamo-sglang
+    - dsr1-fp8-b200-dynamo-sglang-mtp
+  description:
+    - "Update B200 FP8 DSR1 8k1k dynamo-sglang recipes to new pareto configs"
+    - "Replace old per-file recipes with resolved variants from consolidated 8k1k.yaml"
+    - "14 variants: STP/MTP x low-latency/max-throughput with updated concurrencies and scale points"
+  pr-link: https://github.com/SemiAnalysisAI/InferenceX/pull/907
+
+- config-keys:
+    - glm5-fp8-h200-sglang
+  description:
+    - "Add GLM-5 FP8 SGLang H200 single-node benchmark"
+    - "Model: zai-org/GLM-5-FP8, image: lmsysorg/sglang:glm5-hopper"
+    - "Benchmark script: benchmarks/single_node/glm5_fp8_h200.sh"
+    - "Tool-call-parser glm47, reasoning-parser glm45, mem-fraction-static 0.85"
+  pr-link: https://github.com/SemiAnalysisAI/InferenceX/pull/914
+
+- config-keys:
+    - glm5-fp8-b200-sglang
+  description:
+    - "Add GLM-5 FP8 SGLang benchmark for B200"
+    - "Supports TP8 (low latency) and DEP8 (high throughput) modes with NSA attention backend"
+  pr-link: https://github.com/SemiAnalysisAI/InferenceX/pull/915
+
+- config-keys:
     - qwen3.5-fp4-b200-sglang
   description:
     - "Add Qwen3.5-397B-A17B NVFP4 B200 SGLang benchmark config and launch script"
