@@ -10,6 +10,7 @@ check_env_vars \
     OSL \
     RANDOM_RANGE_RATIO \
     RESULT_FILENAME \
+    MAX_MODEL_LEN \
     EP_SIZE
 
 if [[ -n "$SLURM_JOB_ID" ]]; then
@@ -27,9 +28,6 @@ export PYTHONUNBUFFERED=1
 
 SERVER_LOG=/workspace/server.log
 PORT=${PORT:-8888}
-CONTEXT_LENGTH=$((ISL + OSL + 20))
-CUDA_GRAPH_MAX_BS=$CONC
-MAX_RUNNING_REQUESTS=$((CONC > 128 ? CONC : 128))
 MEM_FRAC_STATIC=0.85
 
 echo "Config: ISL=$ISL, OSL=$OSL, CONC=$CONC, EP=$EP_SIZE, MEM=$MEM_FRAC_STATIC, CUDA_BS=$CUDA_GRAPH_MAX_BS, MAX_RR=$MAX_RUNNING_REQUESTS"
@@ -40,14 +38,22 @@ start_gpu_monitor
 set -x
 PYTHONNOUSERSITE=1 python3 -m sglang.launch_server --model-path=$MODEL --host=0.0.0.0 --port=$PORT \
 --trust-remote-code \
---tensor-parallel-size=$TP --data-parallel-size=1 --ep-size $EP_SIZE \
---cuda-graph-max-bs $CUDA_GRAPH_MAX_BS --max-running-requests $MAX_RUNNING_REQUESTS \
---mem-fraction-static $MEM_FRAC_STATIC --chunked-prefill-size 32768 --max-prefill-tokens 32768 \
---context-length $CONTEXT_LENGTH --disable-radix-cache \
---attention-backend trtllm_mha --moe-runner-backend flashinfer_trtllm \
---scheduler-recv-interval 30 \
---stream-interval 30 --quantization modelopt_fp4 \
---kv-cache-dtype fp8_e4m3 --fp4-gemm-backend flashinfer_cutlass > $SERVER_LOG 2>&1 &
+--tensor-parallel-size $TP \
+--ep-size $EP_SIZE \
+--cuda-graph-max-bs $CONC 
+--max-running-requests $CONC \
+--mem-fraction-static $MEM_FRAC_STATIC \
+--chunked-prefill-size 32768 \
+--max-prefill-tokens 32768 \
+--context-length $MAX_MODEL_LEN 
+--attention-backend trtllm_mha 
+--moe-runner-backend flashinfer_trtllm \
+--fp4-gemm-backend flashinfer_cutlass \
+--quantization modelopt_fp4 \
+--kv-cache-dtype fp8_e4m3 \
+--mamba-ssm-dtype bf16 \
+--disable-radix-cache \
+--scheduler-recv-interval 30 --stream-interval 30 > $SERVER_LOG 2>&1 &
 
 SERVER_PID=$!
 
