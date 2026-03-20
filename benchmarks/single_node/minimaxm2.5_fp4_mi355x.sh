@@ -24,12 +24,13 @@ if [ -n "$ROCR_VISIBLE_DEVICES" ]; then
 fi
 
 export VLLM_ROCM_USE_AITER=1
+EXTRA_VLLM_ARGS=""
 if [ "$TP" -ge 4 ]; then
     # AITER CK fused MoE kernels lack compiled tiles for N=intermediate_size/TP
     # when TP>=4 (TP=4, N=384). Disable AITER MoE to fall back to triton, but keep
     # AITER attention. See: https://github.com/vllm-project/vllm/issues/35637
     export VLLM_ROCM_USE_AITER_MOE=0
-    export VLLM_ATTENTION_BACKEND="ROCM_AITER_UNIFIED_ATTN"
+    EXTRA_VLLM_ARGS="--attention-backend ROCM_AITER_UNIFIED_ATTN"
     pip install amd-quark 2>/dev/null || true
 fi
 
@@ -42,8 +43,8 @@ vllm serve $MODEL --port $PORT \
 --gpu-memory-utilization 0.95 \
 --max-model-len $MAX_MODEL_LEN \
 --block-size=32 \
---disable-log-requests \
---trust-remote-code > $SERVER_LOG 2>&1 &
+--trust-remote-code \
+$EXTRA_VLLM_ARGS > $SERVER_LOG 2>&1 &
 
 SERVER_PID=$!
 
