@@ -51,7 +51,7 @@ PYTHONNOUSERSITE=1 python3 -m sglang.launch_server --model-path=$MODEL --host=0.
 --fp4-gemm-backend flashinfer_cutlass \
 --quantization modelopt_fp4 \
 --kv-cache-dtype fp8_e4m3 \
---mamba-ssm-dtype bf16 \
+--mamba-ssm-dtype bfloat16 \
 --disable-radix-cache \
 --scheduler-recv-interval 30 --stream-interval 30 > $SERVER_LOG 2>&1 &
 
