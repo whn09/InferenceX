@@ -64,6 +64,28 @@ B200 reference data from [InferenceX](https://inferencex.com/) (FP4, TP=4, EP=4)
 
 B200 reference data from [InferenceX](https://inferencex.com/) (FP4, TP=4, EP=4).
 
+## Results — ISL=1024, OSL=8192 (max-model-len=16384)
+
+| Concurrency | Output tok/s | tok/s/gpu | Mean TPOT (ms) | Mean TTFT (ms) |
+|:-----------:|:------------:|:---------:|:--------------:|:--------------:|
+| 4           | 449.3        | 112.3     | 8.64           | 987.03         |
+| 8           | 764.3        | 191.1     | 10.20          | 185.41         |
+| 16          | 1,166.3      | 291.6     | 13.30          | 773.35         |
+| 32          | 1,836.4      | 459.1     | 16.90          | 995.67         |
+| **64**      | **2,736.7**  | **684.2** | 22.72          | 878.46         |
+
+### Comparison with B200 (ISL=1024, OSL=8192)
+
+| Concurrency | B200 tok/s/gpu | B300 tok/s/gpu | B300 vs B200 |
+|:-----------:|:--------------:|:--------------:|:------------:|
+| 4           | 118.7          | 112.3          | -5.4%        |
+| 8           | 194.6          | 191.1          | -1.8%        |
+| 16          | 296.1          | 291.6          | -1.5%        |
+| 32          | 465.3          | 459.1          | -1.3%        |
+| 64          | 681.8          | 684.2          | **+0.3%**    |
+
+B200 reference data from [InferenceX](https://inferencex.com/) (FP4, TP=4, EP=4).
+
 ## Key Findings
 
 ### 1. Native sm_103a vs PTX JIT
@@ -82,7 +104,14 @@ At c=64 (B200's max tested), B300 native sm_103a is within **3.6%** of B200 for 
 ### 4. ISL=8192/OSL=1024 — Prefill-Heavy Workload
 With long input (8K tokens), B300 trails B200 more at low concurrency (-14.5% at c=4) but **overtakes B200 at c=64 (+5.1%)**. The larger gap at low-c is because 8K prefill stresses attention kernels more, amplifying the sm_103a software gap. At high concurrency, B300's bandwidth advantage dominates.
 
-### 5. Attention Stack Details
+### 5. ISL=1024/OSL=8192 — Decode-Heavy Workload
+With long output (8K tokens), B300 is **much closer to B200** across all concurrency levels:
+- c=4: only **-5.4%** (vs -8.6% for 1K/1K and -14.5% for 8K/1K)
+- c=64: **matches B200 (+0.3%)**
+
+This confirms that B300's bandwidth advantage shines in **decode-heavy** workloads. Long output generation keeps the GPU busy in sustained decode, where B300's 12 TB/s HBM bandwidth amortizes access latency. The per-GPU throughput at c=64 reaches **684.2 tok/s/gpu** — higher than any other ISL/OSL configuration.
+
+### 6. Attention Stack Details
 
 | Component | Implementation | sm_103a Status |
 |-----------|---------------|----------------|
@@ -129,6 +158,7 @@ bash run_b300_benchmark_full.sh \
 |------|-------------|
 | `kimik2.5_fp4_vllm_tp4_ep4_dpa_false_conc{N}_b300.json` | ISL=1024/OSL=1024 results for concurrency N |
 | `8k_1k/kimik2.5_fp4_vllm_tp4_ep4_dpa_false_conc{N}_b300.json` | ISL=8192/OSL=1024 results for concurrency N |
+| `1k_8k/kimik2.5_fp4_vllm_tp4_ep4_dpa_false_conc{N}_b300.json` | ISL=1024/OSL=8192 results for concurrency N |
 | `gpu_metrics_*.csv` | Per-second GPU utilization metrics during each run |
 | `../../build_sm103a.sh` | Script to build vLLM Docker image with native sm_103a |
 | `../../run_b300_benchmark_full.sh` | Full benchmark matrix runner |
