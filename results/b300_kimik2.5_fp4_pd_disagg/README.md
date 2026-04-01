@@ -179,3 +179,53 @@ EP=4 shows ~3-5% lower throughput than no-EP in PD disagg. The all-to-all commun
 3. **EFA bandwidth**: At 100K ISL, per-NIC bandwidth reaches ~13.6 Gbps (vs ~7 Gbps at ISL=8192). With 4 GPUs x 2 NICs each, aggregate is ~109 Gbps — still only 3.4% of the 3200 Gbps total EFA capacity. MLA architecture compresses KV cache to ~3GB per request (vs ~30GB+ for standard MHA at 100K).
 
 4. **Scaling limitation**: With ISL >> OSL (100K >> 1K), the prefill:decode compute ratio is ~100:1. A single prefill node cannot keep up with decode demand. This scenario would benefit from multiple prefill nodes (e.g., 4P1D or 2P1D configuration).
+
+## Results — ISL=8192, OSL=1024, EP=4, NIXL Connector (LIBFABRIC backend)
+
+NIXL (NVIDIA Inference eXchange Library) is an alternative KV cache transfer connector to Mooncake. It uses a ZMQ-based side channel for engine-to-engine handshake and the LIBFABRIC backend for data transfer over AWS EFA.
+
+### NIXL Setup
+
+| Item | Detail |
+|------|--------|
+| **KV Connector** | NixlConnector (NIXL 0.9.0) |
+| **NIXL Backend** | LIBFABRIC (via `kv_connector_extra_config: {"backends": ["LIBFABRIC"]}`) |
+| **Side Channel** | ZMQ on port 5600, `VLLM_NIXL_SIDE_CHANNEL_HOST` set to each node's routable IP |
+| **Proxy** | Custom `nixl_proxy.py` — extracts `kv_transfer_params` from prefill and forwards to decode |
+
+**Key configuration notes:**
+- Default NIXL backend is UCX, which does NOT work on AWS EFA (EFA lacks IB RC transport support). Must use `backends: ["LIBFABRIC"]`.
+- `VLLM_NIXL_SIDE_CHANNEL_HOST` must be set to each node's routable IP (default `localhost` breaks cross-node handshake).
+- The standard `disagg_proxy_demo.py` does NOT forward `kv_transfer_params` between prefill and decode. A custom proxy is required for NIXL PD disagg.
+
+### NIXL Results (ISL=8192, OSL=1024, EP=4)
+
+| Concurrency | Output tok/s | tok/s/gpu (4 GPUs) | Mean TPOT (ms) | Mean TTFT (ms) |
+|:-----------:|:------------:|:------------------:|:--------------:|:--------------:|
+| 4           | 370.1        | 92.5               | 9.23           | 1,220          |
+| 8           | 697.4        | 174.4              | 10.91          | 333            |
+| 16          | 1,131.1      | 282.8              | 13.19          | 449            |
+| 32          | 1,765.0      | 441.3              | 16.86          | 680            |
+| 64          | 2,583.2      | 645.8              | 23.12          | 949            |
+
+### NIXL vs Mooncake Comparison (ISL=8192, EP=4)
+
+| Concurrency | Mooncake tok/s/gpu | NIXL tok/s/gpu | Difference | Mooncake TTFT | NIXL TTFT | TTFT Diff |
+|:-----------:|:------------------:|:--------------:|:----------:|:-------------:|:---------:|:---------:|
+| 4           | 96.1               | 92.5           | -3.7%      | 939ms         | 1,220ms   | +30%      |
+| 8           | 178.6              | 174.4          | -2.4%      | 335ms         | 333ms     | ~0%       |
+| 16          | 284.8              | 282.8          | -0.7%      | 444ms         | 449ms     | +1%       |
+| 32          | 447.7              | 441.3          | -1.4%      | 786ms         | 680ms     | **-13%**  |
+| 64          | 655.8              | 645.8          | -1.5%      | 1,175ms       | 949ms     | **-19%**  |
+
+### NIXL vs Mooncake Observations
+
+1. **Throughput**: NIXL is ~1-4% slower than Mooncake across all concurrency levels. The difference is small and could be within measurement noise, but consistently favors Mooncake.
+
+2. **TTFT at low concurrency**: NIXL has higher TTFT at c=4 (1,220ms vs 939ms), likely due to the ZMQ handshake overhead on first connection (NIXL exchanges metadata via ZMQ before initiating RDMA transfer, while Mooncake uses a pre-established bootstrap connection).
+
+3. **TTFT at high concurrency**: NIXL shows **13-19% lower TTFT** at c=32-64. This suggests NIXL's LIBFABRIC backend may handle concurrent transfers more efficiently than Mooncake's EFA protocol at higher load.
+
+4. **TPOT**: Nearly identical between NIXL and Mooncake (within 1%), confirming that KV transfer mechanism doesn't affect per-token decode latency.
+
+5. **Overall**: Both connectors perform comparably on AWS EFA. Mooncake has a slight throughput advantage, while NIXL shows better TTFT scaling at high concurrency. The choice between them may depend more on operational considerations (Mooncake requires building from source with `-DUSE_EFA=ON`, while NIXL is built into vLLM but requires LIBFABRIC backend configuration).
