@@ -94,3 +94,35 @@ PD disagg uses **2 nodes × 4 GPUs = 8 GPUs total** vs single-node **1 node × 4
 | 512         | 1,692.1 (4 GPUs)            | 1,329.3 (8 GPUs)          | 79%        |
 
 While per-GPU efficiency is lower (expected for disaggregation), PD disagg enables **higher absolute throughput** and **dramatically lower TTFT** at moderate concurrency, which is critical for latency-sensitive applications. Efficiency improves with higher concurrency as the decode pipeline stays busier.
+
+## Results — ISL=8192, OSL=1024 (max-model-len=16384)
+
+> **Note**: These results use TP=4 without --enable-expert-parallel. The single-node baseline uses TP=4 EP=4 (--enable-expert-parallel). EP-enabled PD disagg results will be added separately for fair comparison.
+
+| Concurrency | Output tok/s | tok/s/gpu (4 GPUs) | Mean TPOT (ms) | Mean TTFT (ms) |
+|:-----------:|:------------:|:------------------:|:--------------:|:--------------:|
+| 4           | 390.4        | 97.6               | 8.70           | 1,126.53       |
+| 8           | 748.6        | 187.1              | 10.12          | 344.93         |
+| 16          | 1,200.9      | 300.2              | 12.41          | 459.91         |
+| 32          | 1,852.7      | 463.2              | 15.92          | 766.98         |
+| 64          | 2,691.5      | 672.9              | 21.91          | 1,152.81       |
+
+### ISL=8192 vs ISL=1024 (PD Disagg, both without EP)
+
+| Concurrency | ISL=1024 tok/s/gpu | ISL=8192 tok/s/gpu | ISL=1024 TTFT | ISL=8192 TTFT |
+|:-----------:|:------------------:|:------------------:|:-------------:|:-------------:|
+| 4           | 100.8              | 97.6               | 1,397ms       | 1,127ms       |
+| 8           | 190.5              | 187.1              | 204ms         | 345ms         |
+| 16          | 307.7              | 300.2              | 247ms         | 460ms         |
+| 32          | 494.1              | 463.2              | 297ms         | 767ms         |
+| 64          | 728.7              | 672.9              | 387ms         | 1,153ms       |
+
+### ISL=8192 Observations
+
+1. **Throughput**: ISL=8192 tok/s/gpu is ~5-8% lower than ISL=1024, which is expected since the decode GPU now handles longer KV caches (8x more KV cache per request → more memory bandwidth consumed during attention).
+
+2. **TTFT**: Significantly higher than ISL=1024 (e.g., 460ms vs 247ms at c=16). This is expected — 8x longer input means ~8x more prefill compute, plus larger KV cache transfer over EFA (~240MB vs ~30MB per request due to MLA architecture).
+
+3. **EFA bandwidth**: With ISL=8192, per-NIC bandwidth reaches ~7 Gbps (vs <2 Gbps at ISL=1024). Still well below the 100 Gbps per-NIC capacity. MLA's compressed KV cache (~240MB per request at ISL=8192) limits EFA utilization — non-MLA architectures (e.g., Llama) would have 10x larger KV transfers.
+
+4. **TPOT**: Nearly identical to ISL=1024 results, confirming that per-token decode latency is dominated by model forward pass, not KV cache size.
