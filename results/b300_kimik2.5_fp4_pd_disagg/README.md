@@ -160,3 +160,22 @@ With --enable-expert-parallel for fair comparison with single-node baseline (TP=
 | 64          | 672.9           | 655.8          | -2.5%      |
 
 EP=4 shows ~3-5% lower throughput than no-EP in PD disagg. The all-to-all communication overhead from expert parallelism slightly exceeds its benefit in this configuration. EP is primarily useful for reducing per-GPU memory footprint, which is not a bottleneck with FP4 quantization on B300 (275GB HBM3e).
+
+## Results — ISL=102400 (100K), OSL=1024, EP=4 (max-model-len=131072, Mooncake EFA)
+
+| Concurrency | Output tok/s | tok/s/gpu (4 GPUs) | Mean TPOT (ms) | Mean TTFT (ms) |
+|:-----------:|:------------:|:------------------:|:--------------:|:--------------:|
+| 1           | 76.1         | 19.0               | 8.66           | 4,177          |
+| 2           | 190.9        | 47.7               | 9.83           | 406            |
+| 4           | 187.6        | 46.9               | 9.95           | 8,540          |
+| 8           | 216.9        | 54.2               | 10.74          | 21,848         |
+
+### 100K ISL Observations
+
+1. **TTFT**: Very high at c=1 (4.2s) due to 100K prefill compute + KV transfer. At c=2, TTFT drops to 406ms (likely benefiting from pipeline overlap). At c=4/8, TTFT explodes (8.5s/21.8s) as prefill requests queue up on the single prefill node.
+
+2. **Throughput**: Peaks at c=2 (47.7 tok/s/gpu) and barely improves at c=8 (54.2 tok/s/gpu). The prefill node becomes the bottleneck — it can only process one 100K prefill at a time, and KV cache transfer (~3GB per request with MLA) takes significant time.
+
+3. **EFA bandwidth**: At 100K ISL, per-NIC bandwidth reaches ~13.6 Gbps (vs ~7 Gbps at ISL=8192). With 4 GPUs x 2 NICs each, aggregate is ~109 Gbps — still only 3.4% of the 3200 Gbps total EFA capacity. MLA architecture compresses KV cache to ~3GB per request (vs ~30GB+ for standard MHA at 100K).
+
+4. **Scaling limitation**: With ISL >> OSL (100K >> 1K), the prefill:decode compute ratio is ~100:1. A single prefill node cannot keep up with decode demand. This scenario would benefit from multiple prefill nodes (e.g., 4P1D or 2P1D configuration).
