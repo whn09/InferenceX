@@ -126,3 +126,37 @@ While per-GPU efficiency is lower (expected for disaggregation), PD disagg enabl
 3. **EFA bandwidth**: With ISL=8192, per-NIC bandwidth reaches ~7 Gbps (vs <2 Gbps at ISL=1024). Still well below the 100 Gbps per-NIC capacity. MLA's compressed KV cache (~240MB per request at ISL=8192) limits EFA utilization — non-MLA architectures (e.g., Llama) would have 10x larger KV transfers.
 
 4. **TPOT**: Nearly identical to ISL=1024 results, confirming that per-token decode latency is dominated by model forward pass, not KV cache size.
+
+## Results — ISL=8192, OSL=1024, EP=4 (max-model-len=16384)
+
+With --enable-expert-parallel for fair comparison with single-node baseline (TP=4 EP=4).
+
+| Concurrency | Output tok/s | tok/s/gpu (4 GPUs) | Mean TPOT (ms) | Mean TTFT (ms) |
+|:-----------:|:------------:|:------------------:|:--------------:|:--------------:|
+| 4           | 384.5        | 96.1               | 9.14           | 939.47         |
+| 8           | 714.3        | 178.6              | 10.63          | 335.26         |
+| 16          | 1,139.1      | 284.8              | 13.11          | 443.88         |
+| 32          | 1,790.7      | 447.7              | 16.46          | 785.89         |
+| 64          | 2,623.3      | 655.8              | 22.46          | 1,174.85       |
+
+### Comparison with Single-Node B300 (TP=4 EP=4, ISL=8192, OSL=1024)
+
+| Concurrency | Single-Node tok/s/gpu | PD Disagg EP=4 tok/s/gpu | Speedup | Single TTFT | PD TTFT | TTFT Improvement |
+|:-----------:|:---------------------:|:------------------------:|:-------:|:-----------:|:-------:|:----------------:|
+| 4           | 92.0                  | 96.1                     | 1.04x   | 475ms       | 939ms   | -2.0x            |
+| 8           | 156.0                 | 178.6                    | 1.14x   | 1,107ms     | 335ms   | **3.3x**         |
+| 16          | 231.5                 | 284.8                    | 1.23x   | 1,484ms     | 444ms   | **3.3x**         |
+| 32          | 343.4                 | 447.7                    | 1.30x   | 1,609ms     | 786ms   | **2.0x**         |
+| 64          | 473.6                 | 655.8                    | 1.38x   | 1,902ms     | 1,175ms | **1.6x**         |
+
+### EP=4 vs No-EP (PD Disagg Only)
+
+| Concurrency | No-EP tok/s/gpu | EP=4 tok/s/gpu | Difference |
+|:-----------:|:---------------:|:--------------:|:----------:|
+| 4           | 97.6            | 96.1           | -1.5%      |
+| 8           | 187.1           | 178.6          | -4.6%      |
+| 16          | 300.2           | 284.8          | -5.1%      |
+| 32          | 463.2           | 447.7          | -3.3%      |
+| 64          | 672.9           | 655.8          | -2.5%      |
+
+EP=4 shows ~3-5% lower throughput than no-EP in PD disagg. The all-to-all communication overhead from expert parallelism slightly exceeds its benefit in this configuration. EP is primarily useful for reducing per-GPU memory footprint, which is not a bottleneck with FP4 quantization on B300 (275GB HBM3e).
