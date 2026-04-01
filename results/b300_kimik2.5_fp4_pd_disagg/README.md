@@ -52,6 +52,8 @@ MC_SLICE_SIZE=262144
 | 32          | 1,976.2      | 494.1              | 15.49          | 297.24         |
 | 64          | 2,914.8      | 728.7              | 21.02          | 386.68         |
 | 128         | 4,513.7      | 1,128.4            | 27.01          | 559.50         |
+| 256         | 7,060.1      | 1,765.0            | 34.33          | 940.06         |
+| 512         | 10,634.2     | 2,658.6            | 45.04          | 1,738.00       |
 
 ## Comparison with Single-Node B300 (sm_103a, ISL=1024, OSL=1024)
 
@@ -63,18 +65,22 @@ MC_SLICE_SIZE=262144
 | 32          | 389.2                 | 494.1               | 1.27x   | 840ms       | 297ms   | **2.8x**         |
 | 64          | 550.9                 | 728.7               | 1.32x   | 1,171ms     | 387ms   | **3.0x**         |
 | 128         | 795.7                 | 1,128.4             | 1.42x   | 1,329ms     | 560ms   | **2.4x**         |
+| 256         | 1,163.3               | 1,765.0             | 1.52x   | 1,574ms     | 940ms   | **1.7x**         |
+| 512         | 1,692.1               | 2,658.6             | 1.57x   | 1,516ms     | 1,738ms | -0.9x            |
 
 ### Key Findings
 
-1. **Throughput**: PD disagg consistently outperforms single-node from c=8 onward, reaching **1.42x at c=128**. The decode GPU is fully dedicated to token generation without prefill contention.
+1. **Throughput**: PD disagg consistently outperforms single-node from c=8 onward, reaching **1.57x at c=512**. The decode GPU is fully dedicated to token generation without prefill contention. Higher concurrency shows greater benefit.
 
-2. **TTFT**: Dramatic improvement at c≥8 (up to **5.0x lower** at c=16). Since prefill runs on a separate node, decode requests are not blocked by long prefill computations.
+2. **TTFT**: Dramatic improvement at c=8-256 (up to **5.0x lower** at c=16). Since prefill runs on a separate node, decode requests are not blocked by long prefill computations. At c=512, TTFT advantage diminishes as the proxy becomes a bottleneck.
 
 3. **TPOT**: PD disagg has lower TPOT across all concurrency levels, as the decode GPU memory and compute are not shared with prefill.
 
 4. **c=4 anomaly**: The high TTFT at c=4 is due to proxy warmup and the sequential prefill→decode handshake being more visible at low concurrency.
 
 5. **EFA bandwidth**: With ISL=1024, KV cache per request is small (~30MB due to MLA architecture), so EFA NICs are underutilized (<2 Gbps per NIC). Larger ISL values would better saturate the 3200 Gbps aggregate EFA bandwidth.
+
+6. **Why not 2x speedup?** With ISL=OSL=1024, decode accounts for >90% of GPU compute time (1024 sequential forward passes vs 1 prefill pass). Offloading prefill frees only ~5-10% of decode GPU capacity. The throughput gain mainly comes from reduced scheduling contention, not freed compute. Higher ISL (e.g., 8192) would shift the balance and yield larger disaggregation benefits.
 
 ### Resource Consideration
 
@@ -84,5 +90,7 @@ PD disagg uses **2 nodes × 4 GPUs = 8 GPUs total** vs single-node **1 node × 4
 |:-----------:|:---------------------------:|:-------------------------:|:----------:|
 | 64          | 550.9 (4 GPUs)              | 364.4 (8 GPUs)            | 66%        |
 | 128         | 795.7 (4 GPUs)              | 564.2 (8 GPUs)            | 71%        |
+| 256         | 1,163.3 (4 GPUs)            | 882.5 (8 GPUs)            | 76%        |
+| 512         | 1,692.1 (4 GPUs)            | 1,329.3 (8 GPUs)          | 79%        |
 
-While per-GPU efficiency is lower (expected for disaggregation), PD disagg enables **higher absolute throughput** and **dramatically lower TTFT**, which is critical for latency-sensitive applications.
+While per-GPU efficiency is lower (expected for disaggregation), PD disagg enables **higher absolute throughput** and **dramatically lower TTFT** at moderate concurrency, which is critical for latency-sensitive applications. Efficiency improves with higher concurrency as the decode pipeline stays busier.
