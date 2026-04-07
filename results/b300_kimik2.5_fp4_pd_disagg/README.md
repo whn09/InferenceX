@@ -94,3 +94,138 @@ PD disagg uses **2 nodes × 4 GPUs = 8 GPUs total** vs single-node **1 node × 4
 | 512         | 1,692.1 (4 GPUs)            | 1,329.3 (8 GPUs)          | 79%        |
 
 While per-GPU efficiency is lower (expected for disaggregation), PD disagg enables **higher absolute throughput** and **dramatically lower TTFT** at moderate concurrency, which is critical for latency-sensitive applications. Efficiency improves with higher concurrency as the decode pipeline stays busier.
+
+## Results — ISL=8192, OSL=1024 (max-model-len=16384)
+
+> **Note**: These results use TP=4 without --enable-expert-parallel. The single-node baseline uses TP=4 EP=4 (--enable-expert-parallel). EP-enabled PD disagg results will be added separately for fair comparison.
+
+| Concurrency | Output tok/s | tok/s/gpu (4 GPUs) | Mean TPOT (ms) | Mean TTFT (ms) |
+|:-----------:|:------------:|:------------------:|:--------------:|:--------------:|
+| 4           | 390.4        | 97.6               | 8.70           | 1,126.53       |
+| 8           | 748.6        | 187.1              | 10.12          | 344.93         |
+| 16          | 1,200.9      | 300.2              | 12.41          | 459.91         |
+| 32          | 1,852.7      | 463.2              | 15.92          | 766.98         |
+| 64          | 2,691.5      | 672.9              | 21.91          | 1,152.81       |
+
+### ISL=8192 vs ISL=1024 (PD Disagg, both without EP)
+
+| Concurrency | ISL=1024 tok/s/gpu | ISL=8192 tok/s/gpu | ISL=1024 TTFT | ISL=8192 TTFT |
+|:-----------:|:------------------:|:------------------:|:-------------:|:-------------:|
+| 4           | 100.8              | 97.6               | 1,397ms       | 1,127ms       |
+| 8           | 190.5              | 187.1              | 204ms         | 345ms         |
+| 16          | 307.7              | 300.2              | 247ms         | 460ms         |
+| 32          | 494.1              | 463.2              | 297ms         | 767ms         |
+| 64          | 728.7              | 672.9              | 387ms         | 1,153ms       |
+
+### ISL=8192 Observations
+
+1. **Throughput**: ISL=8192 tok/s/gpu is ~5-8% lower than ISL=1024, which is expected since the decode GPU now handles longer KV caches (8x more KV cache per request → more memory bandwidth consumed during attention).
+
+2. **TTFT**: Significantly higher than ISL=1024 (e.g., 460ms vs 247ms at c=16). This is expected — 8x longer input means ~8x more prefill compute, plus larger KV cache transfer over EFA (~240MB vs ~30MB per request due to MLA architecture).
+
+3. **EFA bandwidth**: With ISL=8192, per-NIC bandwidth reaches ~7 Gbps (vs <2 Gbps at ISL=1024). Still well below the 100 Gbps per-NIC capacity. MLA's compressed KV cache (~240MB per request at ISL=8192) limits EFA utilization — non-MLA architectures (e.g., Llama) would have 10x larger KV transfers.
+
+4. **TPOT**: Nearly identical to ISL=1024 results, confirming that per-token decode latency is dominated by model forward pass, not KV cache size.
+
+## Results — ISL=8192, OSL=1024, EP=4 (max-model-len=16384)
+
+With --enable-expert-parallel for fair comparison with single-node baseline (TP=4 EP=4).
+
+| Concurrency | Output tok/s | tok/s/gpu (4 GPUs) | Mean TPOT (ms) | Mean TTFT (ms) |
+|:-----------:|:------------:|:------------------:|:--------------:|:--------------:|
+| 4           | 384.5        | 96.1               | 9.14           | 939.47         |
+| 8           | 714.3        | 178.6              | 10.63          | 335.26         |
+| 16          | 1,139.1      | 284.8              | 13.11          | 443.88         |
+| 32          | 1,790.7      | 447.7              | 16.46          | 785.89         |
+| 64          | 2,623.3      | 655.8              | 22.46          | 1,174.85       |
+
+### Comparison with Single-Node B300 (TP=4 EP=4, ISL=8192, OSL=1024)
+
+| Concurrency | Single-Node tok/s/gpu | PD Disagg EP=4 tok/s/gpu | Speedup | Single TTFT | PD TTFT | TTFT Improvement |
+|:-----------:|:---------------------:|:------------------------:|:-------:|:-----------:|:-------:|:----------------:|
+| 4           | 92.0                  | 96.1                     | 1.04x   | 475ms       | 939ms   | -2.0x            |
+| 8           | 156.0                 | 178.6                    | 1.14x   | 1,107ms     | 335ms   | **3.3x**         |
+| 16          | 231.5                 | 284.8                    | 1.23x   | 1,484ms     | 444ms   | **3.3x**         |
+| 32          | 343.4                 | 447.7                    | 1.30x   | 1,609ms     | 786ms   | **2.0x**         |
+| 64          | 473.6                 | 655.8                    | 1.38x   | 1,902ms     | 1,175ms | **1.6x**         |
+
+### EP=4 vs No-EP (PD Disagg Only)
+
+| Concurrency | No-EP tok/s/gpu | EP=4 tok/s/gpu | Difference |
+|:-----------:|:---------------:|:--------------:|:----------:|
+| 4           | 97.6            | 96.1           | -1.5%      |
+| 8           | 187.1           | 178.6          | -4.6%      |
+| 16          | 300.2           | 284.8          | -5.1%      |
+| 32          | 463.2           | 447.7          | -3.3%      |
+| 64          | 672.9           | 655.8          | -2.5%      |
+
+EP=4 shows ~3-5% lower throughput than no-EP in PD disagg. The all-to-all communication overhead from expert parallelism slightly exceeds its benefit in this configuration. EP is primarily useful for reducing per-GPU memory footprint, which is not a bottleneck with FP4 quantization on B300 (275GB HBM3e).
+
+## Results — ISL=102400 (100K), OSL=1024, EP=4 (max-model-len=131072, Mooncake EFA)
+
+| Concurrency | Output tok/s | tok/s/gpu (4 GPUs) | Mean TPOT (ms) | Mean TTFT (ms) |
+|:-----------:|:------------:|:------------------:|:--------------:|:--------------:|
+| 1           | 76.1         | 19.0               | 8.66           | 4,177          |
+| 2           | 190.9        | 47.7               | 9.83           | 406            |
+| 4           | 187.6        | 46.9               | 9.95           | 8,540          |
+| 8           | 216.9        | 54.2               | 10.74          | 21,848         |
+
+### 100K ISL Observations
+
+1. **TTFT**: Very high at c=1 (4.2s) due to 100K prefill compute + KV transfer. At c=2, TTFT drops to 406ms (likely benefiting from pipeline overlap). At c=4/8, TTFT explodes (8.5s/21.8s) as prefill requests queue up on the single prefill node.
+
+2. **Throughput**: Peaks at c=2 (47.7 tok/s/gpu) and barely improves at c=8 (54.2 tok/s/gpu). The prefill node becomes the bottleneck — it can only process one 100K prefill at a time, and KV cache transfer (~3GB per request with MLA) takes significant time.
+
+3. **EFA bandwidth**: At 100K ISL, per-NIC bandwidth reaches ~13.6 Gbps (vs ~7 Gbps at ISL=8192). With 4 GPUs x 2 NICs each, aggregate is ~109 Gbps — still only 3.4% of the 3200 Gbps total EFA capacity. MLA architecture compresses KV cache to ~3GB per request (vs ~30GB+ for standard MHA at 100K).
+
+4. **Scaling limitation**: With ISL >> OSL (100K >> 1K), the prefill:decode compute ratio is ~100:1. A single prefill node cannot keep up with decode demand. This scenario would benefit from multiple prefill nodes (e.g., 4P1D or 2P1D configuration).
+
+## Results — ISL=8192, OSL=1024, EP=4, NIXL Connector (LIBFABRIC backend)
+
+NIXL (NVIDIA Inference eXchange Library) is an alternative KV cache transfer connector to Mooncake. It uses a ZMQ-based side channel for engine-to-engine handshake and the LIBFABRIC backend for data transfer over AWS EFA.
+
+### NIXL Setup
+
+| Item | Detail |
+|------|--------|
+| **KV Connector** | NixlConnector (NIXL 0.9.0) |
+| **NIXL Backend** | LIBFABRIC (via `kv_connector_extra_config: {"backends": ["LIBFABRIC"]}`) |
+| **Side Channel** | ZMQ on port 5600, `VLLM_NIXL_SIDE_CHANNEL_HOST` set to each node's routable IP |
+| **Proxy** | Custom `nixl_proxy.py` — extracts `kv_transfer_params` from prefill and forwards to decode |
+
+**Key configuration notes:**
+- Default NIXL backend is UCX, which does NOT work on AWS EFA (EFA lacks IB RC transport support). Must use `backends: ["LIBFABRIC"]`.
+- `VLLM_NIXL_SIDE_CHANNEL_HOST` must be set to each node's routable IP (default `localhost` breaks cross-node handshake).
+- The standard `disagg_proxy_demo.py` does NOT forward `kv_transfer_params` between prefill and decode. A custom proxy is required for NIXL PD disagg.
+
+### NIXL Results (ISL=8192, OSL=1024, EP=4)
+
+| Concurrency | Output tok/s | tok/s/gpu (4 GPUs) | Mean TPOT (ms) | Mean TTFT (ms) |
+|:-----------:|:------------:|:------------------:|:--------------:|:--------------:|
+| 4           | 370.1        | 92.5               | 9.23           | 1,220          |
+| 8           | 697.4        | 174.4              | 10.91          | 333            |
+| 16          | 1,131.1      | 282.8              | 13.19          | 449            |
+| 32          | 1,765.0      | 441.3              | 16.86          | 680            |
+| 64          | 2,583.2      | 645.8              | 23.12          | 949            |
+
+### NIXL vs Mooncake Comparison (ISL=8192, EP=4)
+
+| Concurrency | Mooncake tok/s/gpu | NIXL tok/s/gpu | Difference | Mooncake TTFT | NIXL TTFT | TTFT Diff |
+|:-----------:|:------------------:|:--------------:|:----------:|:-------------:|:---------:|:---------:|
+| 4           | 96.1               | 92.5           | -3.7%      | 939ms         | 1,220ms   | +30%      |
+| 8           | 178.6              | 174.4          | -2.4%      | 335ms         | 333ms     | ~0%       |
+| 16          | 284.8              | 282.8          | -0.7%      | 444ms         | 449ms     | +1%       |
+| 32          | 447.7              | 441.3          | -1.4%      | 786ms         | 680ms     | **-13%**  |
+| 64          | 655.8              | 645.8          | -1.5%      | 1,175ms       | 949ms     | **-19%**  |
+
+### NIXL vs Mooncake Observations
+
+1. **Throughput**: NIXL is ~1-4% slower than Mooncake across all concurrency levels. The difference is small and could be within measurement noise, but consistently favors Mooncake.
+
+2. **TTFT at low concurrency**: NIXL has higher TTFT at c=4 (1,220ms vs 939ms), likely due to the ZMQ handshake overhead on first connection (NIXL exchanges metadata via ZMQ before initiating RDMA transfer, while Mooncake uses a pre-established bootstrap connection).
+
+3. **TTFT at high concurrency**: NIXL shows **13-19% lower TTFT** at c=32-64. This suggests NIXL's LIBFABRIC backend may handle concurrent transfers more efficiently than Mooncake's EFA protocol at higher load.
+
+4. **TPOT**: Nearly identical between NIXL and Mooncake (within 1%), confirming that KV transfer mechanism doesn't affect per-token decode latency.
+
+5. **Overall**: Both connectors perform comparably on AWS EFA. Mooncake has a slight throughput advantage, while NIXL shows better TTFT scaling at high concurrency. The choice between them may depend more on operational considerations (Mooncake requires building from source with `-DUSE_EFA=ON`, while NIXL is built into vLLM but requires LIBFABRIC backend configuration).
