@@ -157,6 +157,48 @@ PD disagg uses **2 nodes × 8 GPUs = 16 GPUs total** vs single-node **1 node × 
 
 From c=16 onward, PD disagg achieves **higher per-GPU efficiency** than single-node for both ISL values. The single-node baseline is so bottlenecked by prefill/decode contention that adding a second node more than doubles effective throughput. At c=64 with ISL=1024, efficiency reaches **270%** — each GPU in the 2-node setup produces 2.7x the output of a GPU in the single-node setup.
 
+## Results — ISL=8192, OSL=1024: NIXL LIBFABRIC vs Mooncake EFA
+
+vLLM + NIXL LIBFABRIC backend on the same H200/p5en setup. NIXL uses `--enforce-eager` per AWS recommendation.
+
+Ref: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-start-nixl.html
+
+### PD Disagg (NIXL LIBFABRIC)
+
+| Concurrency | Output tok/s | tok/s/gpu (8 GPUs) | Mean TPOT (ms) | Mean TTFT (ms) |
+|:-----------:|:------------:|:------------------:|:--------------:|:--------------:|
+| 4           | 370.6        | 46.3               | 9.71           | 511            |
+| 8           | 611.9        | 76.5               | 11.84          | 677            |
+| 16          | 875.6        | 109.5              | 16.37          | 889            |
+| 32          | 1,265.2      | 158.1              | 22.85          | 1,239          |
+| 64          | 1,652.1      | 206.5              | 34.68          | 2,245          |
+
+### NIXL vs Mooncake Comparison (ISL=8192)
+
+| Concurrency | Mooncake tok/s/gpu | NIXL tok/s/gpu | Throughput Diff | Mooncake TTFT | NIXL TTFT | TTFT Diff |
+|:-----------:|:------------------:|:--------------:|:---------------:|:-------------:|:---------:|:---------:|
+| 4           | 44.3               | 46.3           | +4.5%           | 958ms         | 511ms     | **1.9x better** |
+| 8           | 71.7               | 76.5           | +6.7%           | 1,355ms       | 677ms     | **2.0x better** |
+| 16          | 106.1              | 109.5          | +3.2%           | 1,747ms       | 889ms     | **2.0x better** |
+| 32          | 157.1              | 158.1          | +0.6%           | 1,916ms       | 1,239ms   | **1.5x better** |
+| 64          | 210.1              | 206.5          | -1.7%           | 3,015ms       | 2,245ms   | **1.3x better** |
+
+### Key Findings (NIXL vs Mooncake)
+
+1. **Throughput**: Nearly identical at all concurrency levels (within ±5%). Both frameworks saturate the same EFA bandwidth, so the end-to-end serving throughput is comparable.
+
+2. **TTFT**: NIXL consistently achieves **1.3-2.0x lower TTFT** across all concurrency levels. This is likely due to:
+   - NIXL LIBFABRIC's auto multi-rail striping (lower per-transfer latency)
+   - Less software overhead in the KV transfer path (NIXL is a thin wrapper over libfabric vs Mooncake's multi-layer TransferEngine)
+
+3. **TPOT**: Nearly identical (both ~10ms at c=4, ~35ms at c=64), as TPOT is dominated by decode compute, not KV transfer.
+
+4. **Framework difference**: NIXL uses vLLM, Mooncake also uses vLLM — same inference engine, different KV transfer backends. The throughput parity confirms both backends deliver similar aggregate bandwidth; the TTFT gap reflects per-request transfer latency differences.
+
+5. **nixlbench confirms**: NIXL LIBFABRIC achieves 384 GB/s (8 GPU) vs Mooncake's 337-347 GB/s on the same hardware. The ~10% raw bandwidth advantage translates to lower per-request KV transfer time, hence better TTFT.
+
+---
+
 ## Why H200 PD Disagg Shows Much Larger Gains Than B300
 
 B300 PD disagg peaked at 1.57x throughput (ISL=1024, TP=4). H200 shows up to 5.39x because:
